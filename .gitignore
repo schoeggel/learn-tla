@@ -1,0 +1,7 @@
+/**/states/
+*.dvi
+*.old
+*.out
+*.pdf
+*.tex
+*.toolbox
