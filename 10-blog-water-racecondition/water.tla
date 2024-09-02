@@ -5,16 +5,18 @@ EXTENDS Integers, Sequences, FiniteSets
 Machines == 1..2
 
 (* --algorithm water 
-variables
+variables 
   Cooler = "free";
   Controller = {};
 
-define
+
+define   
   TypeInvariant == Cooler \in {"free", "controlled"}
   OnlyOneController == Cardinality(Controller) <= 1
-end define;
+  ValidController == (Cooler = "controlled") = (Controller # {})
+end define
 
-process machine \in Machines
+process machine \in Machines 
 variables 
   power = "off";
 begin
@@ -22,7 +24,10 @@ begin
     while TRUE do
         either 
             power := "off";
-            Controller := Controller \ {self};
+            if self \in Controller then
+                Controller := Controller \ {self};
+                Cooler := "free";
+            end if
         or  
             power := "on";
         end either;
@@ -38,12 +43,13 @@ begin
     end while;
 end process;
 end algorithm; *)
-\* BEGIN TRANSLATION (chksum(pcal) = "73fbe6c9" /\ chksum(tla) = "70dce8b3")
+\* BEGIN TRANSLATION (chksum(pcal) = "bb814165" /\ chksum(tla) = "79064ed0")
 VARIABLES pc, Cooler, Controller
 
 (* define statement *)
 TypeInvariant == Cooler \in {"free", "controlled"}
 OnlyOneController == Cardinality(Controller) <= 1
+ValidController == (Cooler = "controlled") = (Controller # {})
 
 VARIABLE power
 
@@ -60,15 +66,18 @@ Init == (* Global variables *)
 
 SwitchPower(self) == /\ pc[self] = "SwitchPower"
                      /\ \/ /\ power' = [power EXCEPT ![self] = "off"]
-                           /\ Controller' = Controller \ {self}
+                           /\ IF self \in Controller
+                                 THEN /\ Controller' = Controller \ {self}
+                                      /\ Cooler' = "free"
+                                 ELSE /\ TRUE
+                                      /\ UNCHANGED << Cooler, Controller >>
                         \/ /\ power' = [power EXCEPT ![self] = "on"]
-                           /\ UNCHANGED Controller
+                           /\ UNCHANGED <<Cooler, Controller>>
                      /\ IF self \notin Controller'
                             /\ power'[self] = "on"
-                            /\ Cooler = "free"
+                            /\ Cooler' = "free"
                            THEN /\ pc' = [pc EXCEPT ![self] = "TakeControl"]
                            ELSE /\ pc' = [pc EXCEPT ![self] = "SwitchPower"]
-                     /\ UNCHANGED Cooler
 
 TakeControl(self) == /\ pc[self] = "TakeControl"
                      /\ Cooler' = "controlled"

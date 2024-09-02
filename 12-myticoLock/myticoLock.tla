@@ -6,27 +6,19 @@ EXTENDS Integers, Sequences, FiniteSets, TLC
 
 Machines == 1..2
 
-
-
-(* --algorithm mytico_abc
+(* --algorithm water_lock
 variables
-  Module = "controlled";
+  Module = "free";
   ModuleReservedFor = {};
-  Controller = {1};
-
+  Controller = {};
 
 define
-      
-TypeInvariant ==
-  /\ Module \in {"free", "reserved", "controlled"}
-
-\* The set of controllers must never contain more than 1 element
-OnlyOneController == Cardinality(Controller) <= 1
-
+  TypeInvariant == Module \in {"free", "reserved", "controlled"}
+  OnlyOneController == Cardinality(Controller) <= 1
+  ValidController == (Module = "controlled") = (Controller # {})
+  ValidReservation == (Module = "reserved") = (ModuleReservedFor # {})
 end define;
 
-
-\*  implicit self ?
 macro putReservation() begin
     if Module = "free" /\ ModuleReservedFor = {} then 
         Module := "reserved";
@@ -34,9 +26,6 @@ macro putReservation() begin
     end if;
 end macro;
 
-
-
-\* Machines A and B can switch on or off individually
 process machine \in Machines
 variables 
   power = "off";
@@ -46,18 +35,21 @@ begin
 
         either 
             power := "off";
-            Controller := Controller \ {self};
+            if self \in Controller then
+                Controller := Controller \ {self};
+                Module := "free";
+            end if
         or  
             power := "on";
         end either;
-
         
+        TryReservation:
         if self \notin Controller /\ power = "on" /\ Module = "free" then
             putReservation();
         end if;
         
+        TryTakeControl:
         if self \notin Controller /\ power = "on" /\ Module = "reserved" /\ self \in ModuleReservedFor then
-            TakeControl:
             Module := "controlled";
             ModuleReservedFor := {};
             Controller := Controller \union {self};
@@ -65,60 +57,68 @@ begin
 
     end while;
 end process;
-
-
-
 end algorithm; *)
-\* BEGIN TRANSLATION (chksum(pcal) = "c10e383d" /\ chksum(tla) = "b3f8834d")
-VARIABLES Module, ModuleReservedFor, Controller, pc
+\* BEGIN TRANSLATION (chksum(pcal) = "75ae53ac" /\ chksum(tla) = "2a4768d6")
+VARIABLES pc, Module, ModuleReservedFor, Controller
 
 (* define statement *)
-TypeInvariant ==
-  /\ Module \in {"free", "reserved", "controlled"}
-
-
+TypeInvariant == Module \in {"free", "reserved", "controlled"}
 OnlyOneController == Cardinality(Controller) <= 1
+ValidController == (Module = "controlled") = (Controller # {})
+ValidReservation == (Module = "reserved") = (ModuleReservedFor # {})
 
 VARIABLE power
 
-vars == << Module, ModuleReservedFor, Controller, pc, power >>
+vars == << pc, Module, ModuleReservedFor, Controller, power >>
 
 ProcSet == (Machines)
 
 Init == (* Global variables *)
-        /\ Module = "controlled"
+        /\ Module = "free"
         /\ ModuleReservedFor = {}
-        /\ Controller = {1}
+        /\ Controller = {}
         (* Process machine *)
         /\ power = [self \in Machines |-> "off"]
         /\ pc = [self \in ProcSet |-> "Mainswitch"]
 
 Mainswitch(self) == /\ pc[self] = "Mainswitch"
                     /\ \/ /\ power' = [power EXCEPT ![self] = "off"]
-                          /\ Controller' = Controller \ {self}
+                          /\ IF self \in Controller
+                                THEN /\ Controller' = Controller \ {self}
+                                     /\ Module' = "free"
+                                ELSE /\ TRUE
+                                     /\ UNCHANGED << Module, Controller >>
                        \/ /\ power' = [power EXCEPT ![self] = "on"]
-                          /\ UNCHANGED Controller
-                    /\ IF self \notin Controller' /\ power'[self] = "on" /\ Module = "free"
-                          THEN /\ IF Module = "free" /\ ModuleReservedFor = {}
-                                     THEN /\ Module' = "reserved"
-                                          /\ ModuleReservedFor' = {self}
-                                     ELSE /\ TRUE
-                                          /\ UNCHANGED << Module, 
-                                                          ModuleReservedFor >>
-                          ELSE /\ TRUE
-                               /\ UNCHANGED << Module, ModuleReservedFor >>
-                    /\ IF self \notin Controller' /\ power'[self] = "on" /\ Module' = "reserved" /\ self \in ModuleReservedFor'
-                          THEN /\ pc' = [pc EXCEPT ![self] = "TakeControl"]
-                          ELSE /\ pc' = [pc EXCEPT ![self] = "Mainswitch"]
+                          /\ UNCHANGED <<Module, Controller>>
+                    /\ pc' = [pc EXCEPT ![self] = "TryReservation"]
+                    /\ UNCHANGED ModuleReservedFor
 
-TakeControl(self) == /\ pc[self] = "TakeControl"
-                     /\ Module' = "controlled"
-                     /\ ModuleReservedFor' = {}
-                     /\ Controller' = (Controller \union {self})
-                     /\ pc' = [pc EXCEPT ![self] = "Mainswitch"]
-                     /\ power' = power
+TryReservation(self) == /\ pc[self] = "TryReservation"
+                        /\ IF self \notin Controller /\ power[self] = "on" /\ Module = "free"
+                              THEN /\ IF Module = "free" /\ ModuleReservedFor = {}
+                                         THEN /\ Module' = "reserved"
+                                              /\ ModuleReservedFor' = {self}
+                                         ELSE /\ TRUE
+                                              /\ UNCHANGED << Module, 
+                                                              ModuleReservedFor >>
+                              ELSE /\ TRUE
+                                   /\ UNCHANGED << Module, ModuleReservedFor >>
+                        /\ pc' = [pc EXCEPT ![self] = "TryTakeControl"]
+                        /\ UNCHANGED << Controller, power >>
 
-machine(self) == Mainswitch(self) \/ TakeControl(self)
+TryTakeControl(self) == /\ pc[self] = "TryTakeControl"
+                        /\ IF self \notin Controller /\ power[self] = "on" /\ Module = "reserved" /\ self \in ModuleReservedFor
+                              THEN /\ Module' = "controlled"
+                                   /\ ModuleReservedFor' = {}
+                                   /\ Controller' = (Controller \union {self})
+                              ELSE /\ TRUE
+                                   /\ UNCHANGED << Module, ModuleReservedFor, 
+                                                   Controller >>
+                        /\ pc' = [pc EXCEPT ![self] = "Mainswitch"]
+                        /\ power' = power
+
+machine(self) == Mainswitch(self) \/ TryReservation(self)
+                    \/ TryTakeControl(self)
 
 Next == (\E self \in Machines: machine(self))
 
