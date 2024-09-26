@@ -1,4 +1,4 @@
-------------------------------- MODULE myticoLock -------------------------------
+------------------------------- MODULE water_reservation -------------------------------
 \* Vereinfachung: Modul C weiss, ob es kontrolliert wird oder nicht.
 \* Modul merkt, wenn Controller stirbt.
 
@@ -43,13 +43,15 @@ begin
             power := "on";
         end either;
         
-        TryReservation:
+        CheckConditionReservation:
         if self \notin Controller /\ power = "on" /\ Cooler = "free" then
+            TryReservation:
             putReservation();
         end if;
         
-        TryTakeControl:
+        CheckConditionControl:
         if self \notin Controller /\ power = "on" /\ Cooler = "reserved" /\ self \in CoolerReservedFor then
+            TakeControl:
             Cooler := "controlled";
             CoolerReservedFor := {};
             Controller := Controller \union {self};
@@ -58,7 +60,7 @@ begin
     end while;
 end process;
 end algorithm; *)
-\* BEGIN TRANSLATION (chksum(pcal) = "40168cac" /\ chksum(tla) = "1907a86c")
+\* BEGIN TRANSLATION (chksum(pcal) = "3e81f239" /\ chksum(tla) = "2987e90c")
 VARIABLES pc, Cooler, CoolerReservedFor, Controller
 
 (* define statement *)
@@ -90,35 +92,42 @@ Mainswitch(self) == /\ pc[self] = "Mainswitch"
                                      /\ UNCHANGED << Cooler, Controller >>
                        \/ /\ power' = [power EXCEPT ![self] = "on"]
                           /\ UNCHANGED <<Cooler, Controller>>
-                    /\ pc' = [pc EXCEPT ![self] = "TryReservation"]
+                    /\ pc' = [pc EXCEPT ![self] = "CheckConditionReservation"]
                     /\ UNCHANGED CoolerReservedFor
 
+CheckConditionReservation(self) == /\ pc[self] = "CheckConditionReservation"
+                                   /\ IF self \notin Controller /\ power[self] = "on" /\ Cooler = "free"
+                                         THEN /\ pc' = [pc EXCEPT ![self] = "TryReservation"]
+                                         ELSE /\ pc' = [pc EXCEPT ![self] = "CheckConditionControl"]
+                                   /\ UNCHANGED << Cooler, CoolerReservedFor, 
+                                                   Controller, power >>
+
 TryReservation(self) == /\ pc[self] = "TryReservation"
-                        /\ IF self \notin Controller /\ power[self] = "on" /\ Cooler = "free"
-                              THEN /\ IF Cooler = "free" /\ CoolerReservedFor = {}
-                                         THEN /\ Cooler' = "reserved"
-                                              /\ CoolerReservedFor' = {self}
-                                         ELSE /\ TRUE
-                                              /\ UNCHANGED << Cooler, 
-                                                              CoolerReservedFor >>
+                        /\ IF Cooler = "free" /\ CoolerReservedFor = {}
+                              THEN /\ Cooler' = "reserved"
+                                   /\ CoolerReservedFor' = {self}
                               ELSE /\ TRUE
                                    /\ UNCHANGED << Cooler, CoolerReservedFor >>
-                        /\ pc' = [pc EXCEPT ![self] = "TryTakeControl"]
+                        /\ pc' = [pc EXCEPT ![self] = "CheckConditionControl"]
                         /\ UNCHANGED << Controller, power >>
 
-TryTakeControl(self) == /\ pc[self] = "TryTakeControl"
-                        /\ IF self \notin Controller /\ power[self] = "on" /\ Cooler = "reserved" /\ self \in CoolerReservedFor
-                              THEN /\ Cooler' = "controlled"
-                                   /\ CoolerReservedFor' = {}
-                                   /\ Controller' = (Controller \union {self})
-                              ELSE /\ TRUE
-                                   /\ UNCHANGED << Cooler, CoolerReservedFor, 
-                                                   Controller >>
-                        /\ pc' = [pc EXCEPT ![self] = "Mainswitch"]
-                        /\ power' = power
+CheckConditionControl(self) == /\ pc[self] = "CheckConditionControl"
+                               /\ IF self \notin Controller /\ power[self] = "on" /\ Cooler = "reserved" /\ self \in CoolerReservedFor
+                                     THEN /\ pc' = [pc EXCEPT ![self] = "TakeControl"]
+                                     ELSE /\ pc' = [pc EXCEPT ![self] = "Mainswitch"]
+                               /\ UNCHANGED << Cooler, CoolerReservedFor, 
+                                               Controller, power >>
 
-machine(self) == Mainswitch(self) \/ TryReservation(self)
-                    \/ TryTakeControl(self)
+TakeControl(self) == /\ pc[self] = "TakeControl"
+                     /\ Cooler' = "controlled"
+                     /\ CoolerReservedFor' = {}
+                     /\ Controller' = (Controller \union {self})
+                     /\ pc' = [pc EXCEPT ![self] = "Mainswitch"]
+                     /\ power' = power
+
+machine(self) == Mainswitch(self) \/ CheckConditionReservation(self)
+                    \/ TryReservation(self) \/ CheckConditionControl(self)
+                    \/ TakeControl(self)
 
 Next == (\E self \in Machines: machine(self))
 
